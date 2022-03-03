@@ -12,12 +12,12 @@ int init()
     uart0_filestream = open("/dev/serial0", O_RDWR | O_NOCTTY | O_NDELAY);
     if (uart0_filestream == -1)
     {
-        printf("Erro - Não foi possível iniciar a UART.\n");
+        // printf("Erro - Não foi possível iniciar a UART.\n");
         return -1;
     }
     else
     {
-        printf("UART inicializada!\n");
+        // printf("UART inicializada!\n");
     }
     struct termios options;
     tcgetattr(uart0_filestream, &options);
@@ -35,16 +35,16 @@ int uart_write(unsigned char *mensagem, int tamanho)
 {
     if (uart0_filestream != -1)
     {
-        printf("Escrevendo caracteres na UART ...");
+        // printf("Escrevendo caracteres na UART ...");
         int count = write(uart0_filestream, &mensagem[0], tamanho);
         if (count < 0)
         {
-            printf("UART TX error\n");
+            // printf("UART TX error\n");
             return -1;
         }
         else
         {
-            printf("escrito.\n");
+            // printf("escrito.\n");
         }
     }
     return 0;
@@ -58,12 +58,12 @@ int uart_read(unsigned char *mensagem)
         tamanho = read(uart0_filestream, (void *)mensagem, 255);
         if (tamanho < 0)
         {
-            printf("Erro na leitura.\n");
+            // printf("Erro na leitura.\n");
             return -1;
         }
         else if (tamanho == 0)
         {
-            printf("Nenhum dado disponível.\n");
+            // printf("Nenhum dado disponível.\n");
             return -1;
         }
     }

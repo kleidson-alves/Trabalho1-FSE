@@ -9,36 +9,28 @@ int write_modbus(char subcodigo, void *buffer)
 {
     unsigned char tx_buffer[20];
     unsigned char *p_tx_buffer;
-    int tamanho = 7;
+    int tamanho;
 
     p_tx_buffer = &tx_buffer[0];
     *p_tx_buffer++ = 0x01;
     *p_tx_buffer++ = 0x16;
     *p_tx_buffer++ = subcodigo;
+    *p_tx_buffer++ = 3;
+    *p_tx_buffer++ = 8;
+    *p_tx_buffer++ = 6;
+    *p_tx_buffer++ = 1;
 
-    if (subcodigo == 0xB1)
+    if (subcodigo == 0xD3 || subcodigo == 0xD4)
     {
-        int *dado = buffer;
-        memcpy(&tx_buffer[3], dado, 4);
-    }
-    else if (subcodigo == 0xB2)
-    {
-        float *dado = buffer;
-        memcpy(&tx_buffer[3], dado, 4);
+        memcpy(&tx_buffer[7], buffer, sizeof(char));
+        tamanho = p_tx_buffer - &tx_buffer[0] + sizeof(char);
     }
     else
     {
-        char *dado = buffer;
-        int tam = strlen(dado);
-        int i = 0;
-
-        *p_tx_buffer++ = tam;
-        for (i = 0; i < tam; i++)
-        {
-            *p_tx_buffer++ = dado[i];
-        }
-        tamanho = p_tx_buffer - &tx_buffer[0];
+        memcpy(&tx_buffer[7], buffer, sizeof(float));
+        tamanho = p_tx_buffer - &tx_buffer[0] + sizeof(float);
     }
+
     short crc = calcula_CRC(tx_buffer, tamanho);
     memcpy(&tx_buffer[tamanho], &crc, 2);
 
@@ -48,7 +40,7 @@ int write_modbus(char subcodigo, void *buffer)
     return 0;
 }
 
-void read_modbus(char subcodigo)
+int read_modbus(char subcodigo, void *buffer)
 {
     unsigned char tx_buffer[20];
     unsigned char rx_buffer[255];
@@ -58,32 +50,41 @@ void read_modbus(char subcodigo)
     *p_tx_buffer++ = 0x01;
     *p_tx_buffer++ = 0x23;
     *p_tx_buffer++ = subcodigo;
+    *p_tx_buffer++ = 3;
+    *p_tx_buffer++ = 8;
+    *p_tx_buffer++ = 6;
+    *p_tx_buffer++ = 1;
     short crc = calcula_CRC(tx_buffer, (p_tx_buffer - &tx_buffer[0]));
 
-    memcpy(&tx_buffer[3], &crc, 2);
+    memcpy(&tx_buffer[7], &crc, sizeof(short));
 
     init();
-    uart_write(tx_buffer, 5);
+    uart_write(tx_buffer, p_tx_buffer - &tx_buffer[0] + sizeof(short));
     sleep(1);
-    int tamanho = uart_read(rx_buffer);
 
-    if (subcodigo == 0xA1)
+    int i, cond = 0, tamanho;
+    for (i = 0; i < 5; i++)
     {
-        int num;
-        memcpy(&num, &rx_buffer[3], 4);
-        printf("%i Bytes lidos : %d\n", tamanho, num);
+        short rx_crc;
+        tamanho = uart_read(rx_buffer);
+        memcpy(&rx_crc, &rx_buffer[tamanho - 2], sizeof(short));
+
+        if (calcula_CRC(rx_buffer, tamanho - 2) == rx_crc)
+        {
+
+            cond = 1;
+            break;
+        }
     }
-    else if (subcodigo == 0xA2)
-    {
-        float num;
-        memcpy(&num, &rx_buffer[3], 4);
-        printf("%i Bytes lidos : %f\n", tamanho, num);
-    }
-    else
-    {
-        char dado[50];
-        memcpy(dado, &rx_buffer[4], rx_buffer[3]);
-        printf("%i Bytes lidos : %s\n", tamanho, dado);
-    }
+    if (cond == 0)
+        return -1;
+
+    int *dado = buffer;
+
+    memcpy(dado, &rx_buffer[3], sizeof(int));
+
+    printf("%d - ", *dado);
+
     close_uart();
+    return tamanho;
 }
