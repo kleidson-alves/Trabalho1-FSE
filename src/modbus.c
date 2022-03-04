@@ -54,8 +54,8 @@ int read_modbus(char subcodigo, void *buffer)
     *p_tx_buffer++ = 8;
     *p_tx_buffer++ = 6;
     *p_tx_buffer++ = 1;
-    short crc = calcula_CRC(tx_buffer, (p_tx_buffer - &tx_buffer[0]));
 
+    short crc = calcula_CRC(tx_buffer, (p_tx_buffer - &tx_buffer[0]));
     memcpy(&tx_buffer[7], &crc, sizeof(short));
 
     init();
@@ -71,7 +71,6 @@ int read_modbus(char subcodigo, void *buffer)
 
         if (calcula_CRC(rx_buffer, tamanho - 2) == rx_crc)
         {
-
             cond = 1;
             break;
         }
@@ -82,8 +81,6 @@ int read_modbus(char subcodigo, void *buffer)
     int *dado = buffer;
 
     memcpy(dado, &rx_buffer[3], sizeof(int));
-
-    printf("%d - ", *dado);
 
     close_uart();
     return tamanho;
