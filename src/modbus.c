@@ -5,10 +5,9 @@
 #include "uart.h"
 #include "crc.h"
 
-int write_modbus(char subcodigo, void *buffer)
-{
+int write_modbus(char subcodigo, void* buffer) {
     unsigned char tx_buffer[20];
-    unsigned char *p_tx_buffer;
+    unsigned char* p_tx_buffer;
     int tamanho;
 
     p_tx_buffer = &tx_buffer[0];
@@ -20,31 +19,28 @@ int write_modbus(char subcodigo, void *buffer)
     *p_tx_buffer++ = 6;
     *p_tx_buffer++ = 1;
 
-    if (subcodigo == 0xD3 || subcodigo == 0xD4)
-    {
+    if (subcodigo == 0xD3 || subcodigo == 0xD4) {
         memcpy(&tx_buffer[7], buffer, sizeof(char));
         tamanho = p_tx_buffer - &tx_buffer[0] + sizeof(char);
     }
-    else
-    {
+    else {
         memcpy(&tx_buffer[7], buffer, sizeof(float));
         tamanho = p_tx_buffer - &tx_buffer[0] + sizeof(float);
     }
 
     short crc = calcula_CRC(tx_buffer, tamanho);
-    memcpy(&tx_buffer[tamanho], &crc, 2);
+    memcpy(&tx_buffer[tamanho], &crc, sizeof(short));
 
     init();
-    uart_write(tx_buffer, tamanho + 2);
+    uart_write(tx_buffer, tamanho + sizeof(short));
     close_uart();
     return 0;
 }
 
-int read_modbus(char subcodigo, void *buffer)
-{
+int read_modbus(char subcodigo, void* buffer) {
     unsigned char tx_buffer[20];
     unsigned char rx_buffer[255];
-    unsigned char *p_tx_buffer;
+    unsigned char* p_tx_buffer;
 
     p_tx_buffer = &tx_buffer[0];
     *p_tx_buffer++ = 0x01;
@@ -63,14 +59,12 @@ int read_modbus(char subcodigo, void *buffer)
     sleep(1);
 
     int i, cond = 0, tamanho;
-    for (i = 0; i < 5; i++)
-    {
+    for (i = 0; i < 5; i++) {
         short rx_crc;
         tamanho = uart_read(rx_buffer);
         memcpy(&rx_crc, &rx_buffer[tamanho - 2], sizeof(short));
 
-        if (calcula_CRC(rx_buffer, tamanho - 2) == rx_crc)
-        {
+        if (calcula_CRC(rx_buffer, tamanho - 2) == rx_crc) {
             cond = 1;
             break;
         }
@@ -78,7 +72,7 @@ int read_modbus(char subcodigo, void *buffer)
     if (cond == 0)
         return -1;
 
-    int *dado = buffer;
+    int* dado = buffer;
 
     memcpy(dado, &rx_buffer[3], sizeof(int));
 

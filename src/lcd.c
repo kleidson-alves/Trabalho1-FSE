@@ -19,7 +19,7 @@
 #include <stdio.h>
 
 #include "lcd.h"
-// Define some device parameters
+ // Define some device parameters
 #define I2C_ADDR 0x27 // I2C device address
 
 // Define some device constants
@@ -36,8 +36,7 @@
 
 int fd; // seen by all subroutines
 
-void lcd_setup()
-{
+void lcd_setup() {
 
     if (wiringPiSetup() == -1)
         exit(1);
@@ -50,51 +49,44 @@ void lcd_setup()
 }
 
 // float to string
-void typeFloat(float myFloat)
-{
+void typeFloat(float myFloat) {
     char buffer[20];
     sprintf(buffer, "%4.2f", myFloat);
     typeln(buffer);
 }
 
 // int to string
-void typeInt(int i)
-{
+void typeInt(int i) {
     char array1[20];
     sprintf(array1, "%d", i);
     typeln(array1);
 }
 
 // clr lcd go home loc 0x80
-void ClrLcd(void)
-{
+void ClrLcd(void) {
     lcd_byte(0x01, LCD_CMD);
     lcd_byte(0x02, LCD_CMD);
 }
 
 // go to location on LCD
-void lcdLoc(int line)
-{
+void lcdLoc(int line) {
     lcd_byte(line, LCD_CMD);
 }
 
 // out char to LCD at current position
-void typeChar(char val)
-{
+void typeChar(char val) {
 
     lcd_byte(val, LCD_CHR);
 }
 
 // this allows use of any size string
-void typeln(const char *s)
-{
+void typeln(const char* s) {
 
     while (*s)
         lcd_byte(*(s++), LCD_CHR);
 }
 
-void lcd_byte(int bits, int mode)
-{
+void lcd_byte(int bits, int mode) {
 
     // Send byte to data pins
     //  bits = the data
@@ -114,8 +106,7 @@ void lcd_byte(int bits, int mode)
     lcd_toggle_enable(bits_low);
 }
 
-void lcd_toggle_enable(int bits)
-{
+void lcd_toggle_enable(int bits) {
     // Toggle enable pin on LCD display
     delayMicroseconds(500);
     wiringPiI2CReadReg8(fd, (bits | ENABLE));
@@ -124,8 +115,7 @@ void lcd_toggle_enable(int bits)
     delayMicroseconds(500);
 }
 
-void lcd_init()
-{
+void lcd_init() {
     // Initialise display
     lcd_byte(0x33, LCD_CMD); // Initialise
     lcd_byte(0x32, LCD_CMD); // Initialise

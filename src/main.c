@@ -1,18 +1,31 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <string.h>
+#include <time.h>
 #include "modbus.h"
 #include "pid.h"
 #include "wiringPi.h"
 #include "softPwm.h"
 
-void menu()
-{
-    printf("(1) Temperatura de Referência pelo teclado");
-}
+#define POTENCIOMETRO 0
+#define CURVA 1
+#define ARQUIVO 1
+#define TERMINAL 2
+#define RESISTOR 4
+#define VENTOINHA 5
 
-void config_param()
-{
+struct Dado_Arquivo {
+    int tempo;
+    float temp;
+}Dado_Arquivo;
+
+struct Dado_Arquivo dados[20];
+int cont_tempo = -1;
+int pos = 0;
+
+void config_param() {
     double kp, ki, kd;
     printf("Defina o Kp: ");
     scanf("%lf", &kp);
@@ -24,122 +37,263 @@ void config_param()
     pid_configura_constantes(kp, ki, kd);
 }
 
-void potenciometro()
-{
-    float temp_interna, temp_potenciometro;
-    int PWM_ventoinha = 5;
-    int PWM_resistor = 4;
+void atualizar_parametros() {
+    char escolha, lixo;
+    printf("Parâmetros atuais:\n");
+    pid_imprime_constantes();
+    printf("\n------------------------------------\n\n");
+    printf("Deseja configurar novos parâmetros? (s/n)\n");
+    scanf("%c", &lixo);
+    while (1) {
 
-    if (wiringPiSetup() != -1)
-    {
-        pinMode(PWM_ventoinha, OUTPUT);
-        softPwmCreate(PWM_ventoinha, 40, 100);
+        scanf("%c", &escolha);
+        if (escolha == 's' || escolha == 'S') {
+            config_param();
+            printf("Parametros atualizados com sucesso\n");
+            break;
+        }
+        else if (escolha == 'n' || escolha == 'N')
+            break;
+        else
+            printf("Entrada invalida\n");
+    }
+}
 
-        pinMode(PWM_resistor, OUTPUT);
-        softPwmCreate(PWM_resistor, 1, 100);
-        while (1)
-        {
+void config_temp() {
+    float referencia;
+    printf("Temperatura de referencia: ");
+    scanf("%f", &referencia);
+
+    pid_atualiza_referencia(referencia);
+    write_modbus(0xD2, &referencia);
+}
+
+void carrega_arquivo() {
+    FILE* fp = fopen("curva_reflow.csv", "r");
+    if (!fp) {
+        printf("nao foi possivel abrir o arquivo csv\n");
+    }
+
+    char buffer[1024];
+    int row = 0;
+    int column = 0;
+
+    while (fgets(buffer, 1024, fp)) {
+        column = 0;
+        row++;
+
+        if (row == 1)
+            continue;
+
+        char* value = strtok(buffer, ", ");
+        while (value) {
+            if (column == 0) {
+                dados[row - 2].tempo = strtof(value, NULL);
+            }
+
+            if (column == 1) {
+                dados[row - 2].temp = strtof(value, NULL);
+            }
+
+            value = strtok(NULL, ", ");
+            column++;
+        }
+    }
+    fclose(fp);
+}
+
+void salvar_dados_arquivo() {
+    FILE* fpt;
+    struct tm* data_hora;
+    time_t segundos;
+    float dado;
+
+    time(&segundos);
+    data_hora = localtime(&segundos);
+
+    fpt = fopen("dados.csv", "a");
+    fprintf(fpt, "%d/%d/%d, %d:%d:%d,", data_hora->tm_mday, data_hora->tm_mon + 1, data_hora->tm_year + 1900, data_hora->tm_hour, data_hora->tm_min, data_hora->tm_sec);
+    if (read_modbus(0xC1, &dado) != -1) {
+        fprintf(fpt, "%.2lf,", dado);
+    }
+    fprintf(fpt, "%.2lf,", pid_retorna_referencia());
+
+
+    fclose(fpt);
+}
+
+void controla_ambiente(int* dispositivo) {
+    float temp_interna;
+
+    if (read_modbus(0xC1, &temp_interna) != -1) {
+        int sinal_controle = pid_controle(temp_interna);
+        write_modbus(0xD1, &sinal_controle);
+
+        if (sinal_controle >= 0) {
+            if (*dispositivo < 0) {
+                printf("Resistor acionado\n");
+            }
+
+            softPwmWrite(RESISTOR, sinal_controle);
+        }
+        else {
+            if (*dispositivo > 0) {
+                printf("Ventoinha acionada\n");
+            }
+            if (sinal_controle > -40) {
+                sinal_controle = -40;
+            }
+
+            softPwmWrite(VENTOINHA, sinal_controle * -1);
+        }
+        *dispositivo = sinal_controle;
+    }
+}
+
+void curva_reflow(int modo, int* dispositivo) {
+    if (modo == TERMINAL) {
+        controla_ambiente(dispositivo);
+    }
+    else if (modo == ARQUIVO) {
+        float temp_referencia;
+        if (cont_tempo == dados[pos].tempo) {
+            temp_referencia = dados[pos].temp;
+            pos++;
+            pid_atualiza_referencia(temp_referencia);
+            write_modbus(0xD2, &temp_referencia);
+        }
+        controla_ambiente(dispositivo);
+    }
+}
+
+void potenciometro(int* dispositivo) {
+    float temp_potenciometro;
+    if (read_modbus(0xC2, &temp_potenciometro) != -1) {
+        pid_atualiza_referencia(temp_potenciometro);
+        write_modbus(0xD2, &temp_potenciometro);
+    }
+    controla_ambiente(dispositivo);
+}
+
+void controle(char modo) {
+    char modo_controle = modo;
+    int dispositivo = -1;
+    write_modbus(0xD4, &modo_controle);
+
+    if (modo == TERMINAL)
+        printf("Controle pela referência dada pelo terminal\n");
+    else if (modo == CURVA)
+        printf("Controle por Curva Reflow\n");
+    else
+        printf("Controle por potenciometro\n");
+
+    if (wiringPiSetup() != -1) {
+        pinMode(VENTOINHA, OUTPUT);
+        softPwmCreate(VENTOINHA, 40, 100);
+
+        pinMode(RESISTOR, OUTPUT);
+        softPwmCreate(RESISTOR, 1, 100);
+
+        while (1) {
             int dado;
-            if (read_modbus(0xC3, &dado) != -1 && dado == 0x02)
-            {
-                char estado_sistema = 0;
-                write_modbus(0xD3, &estado_sistema);
-                printf("O sistema está sendo desligado...");
-                softPwmStop(PWM_resistor);
-                softPwmStop(PWM_ventoinha);
-                break;
-            }
-
-            if (read_modbus(0xC2, &temp_potenciometro) != -1)
-            {
-                pid_atualiza_referencia(temp_potenciometro);
-                write_modbus(0xD2, &temp_potenciometro);
-            }
-
-            if (read_modbus(0xC1, &temp_interna) != -1)
-            {
-                int sinal_controle = pid_controle(temp_interna);
-
-                write_modbus(0xD1, &sinal_controle);
-
-                if (sinal_controle >= 0)
-                {
-                    printf("Acionando o resistor\n");
-
-                    softPwmWrite(PWM_resistor, sinal_controle);
+            if (read_modbus(0xC3, &dado) != -1) {
+                if (dado == 0x02) {
+                    printf("O sistema está sendo desligado...\n");
+                    softPwmStop(RESISTOR);
+                    softPwmStop(VENTOINHA);
+                    break;
                 }
-                else
-                {
-                    sinal_controle *= -1;
-                    if (sinal_controle < 40)
-                    {
-                        sinal_controle = 40;
-                    }
-                    printf("Acionando a ventoinha\n");
+                else if (dado == 0x03) {
+                    modo = POTENCIOMETRO;
+                    write_modbus(0xD4, &modo);
+                    cont_tempo = -1;
+                    printf("Controle alterado para potenciometro\n");
 
-                    softPwmWrite(PWM_ventoinha, sinal_controle);
+                }
+                else if (dado == 0x04) {
+                    modo = CURVA;
+                    carrega_arquivo();
+                    write_modbus(0xD4, &modo);
+                    printf("Controle alterado para Curva Reflow\n");
                 }
             }
 
+            if (modo == POTENCIOMETRO) {
+                potenciometro(&dispositivo);
+            }
+            else if (modo == CURVA) {
+                cont_tempo++;
+                curva_reflow(ARQUIVO, &dispositivo);
+            }
+            else if (modo == TERMINAL) {
+                curva_reflow(TERMINAL, &dispositivo);
+            }
+            salvar_dados_arquivo();
             sleep(1);
         }
     }
-    else
-    {
+    else {
         printf("Nao foi possivel incializar a wiringPi");
     }
 }
 
-int main(int argc, const char *argv[])
-{
+
+void menu() {
+    int escolha, dado;
+    while (1) {
+        printf("1 - Parametros\n2 - Definir temperatura de referencia\n3 - Potenciometro/Curva Reflow\n");
+        scanf("%d", &escolha);
+
+        if (escolha == 1)
+            atualizar_parametros();
+        else if (escolha == 2) {
+            config_temp();
+            controle(TERMINAL);
+            break;
+        }
+        else if (escolha == 3) {
+            controle(POTENCIOMETRO);
+            break;
+        }
+
+        if (read_modbus(0xC3, &dado) != -1 && dado == 0x02) {
+            printf("O sistema está sendo desligado...\n");
+            break;
+        }
+
+        sleep(1);
+    }
+}
+
+int main(int argc, const char* argv[]) {
+    printf("Para inciar, defina os parametros para o calculo do PID\n");
     config_param();
 
-    // int opcao;
-    // scanf("%d", &opcao);
+    printf("Aguardando o sistema ser ligado...\n");
 
-    // if (opcao == 1)
-    // {
-    //     float referencia;
-    //     scanf("%f", &referencia);
-    //     pid_atualiza_referencia(referencia);
-    // }
+    FILE* fpt;
+    struct tm* data_hora;
+    time_t segundos;
 
-    while (1)
-    {
+    fpt = fopen("dados.csv", "w+");
+    fprintf(fpt, "Data, Hora, Temperatura Interna, Temperatura Externa, Temperatura Usuario, Valor Acionamento\n");
+    fclose(fpt);
+
+    while (1) {
         int dado;
         if (read_modbus(0xC3, &dado) == -1)
             break;
 
-        if (dado == 0x01)
-        {
+        if (dado == 0x01) {
             printf("Ligando o sistema...\n");
             char estado_sistema = 1;
             write_modbus(0xD3, &estado_sistema);
-            dado = 0x03;
-        }
-
-        else if (dado == 0x02)
-        {
-            printf("O sistema está sendo desligado...");
-            char estado_sistema = 0;
+            menu();
+            estado_sistema = 0;
             write_modbus(0xD3, &estado_sistema);
-        }
-
-        if (dado == 0x03)
-        {
-            printf("Modo de controle pelo potenciometro");
-            char modo_controle = 0;
-            write_modbus(0xD4, &modo_controle);
-            potenciometro();
-        }
-        else if (dado == 0x04)
-        {
-            printf("Modo de controle pela curva reflow");
-            char modo_controle = 1;
-            write_modbus(0xD4, &modo_controle);
+            printf("Aguardando o sistema ser ligado...\n");
         }
         sleep(1);
     }
-
     return 0;
 }
