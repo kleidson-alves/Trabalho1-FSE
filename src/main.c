@@ -4,10 +4,14 @@
 #include <unistd.h>
 #include <string.h>
 #include <time.h>
+#include <signal.h>
+
 #include "modbus.h"
 #include "pid.h"
 #include "wiringPi.h"
 #include "softPwm.h"
+#include "bme280.h"
+#include "sensor.h"
 
 #define POTENCIOMETRO 0
 #define CURVA 1
@@ -102,7 +106,7 @@ void carrega_arquivo() {
     fclose(fp);
 }
 
-void salvar_dados_arquivo() {
+void salvar_dados_arquivo(int valor_acionamento) {
     FILE* fpt;
     struct tm* data_hora;
     time_t segundos;
@@ -112,12 +116,11 @@ void salvar_dados_arquivo() {
     data_hora = localtime(&segundos);
 
     fpt = fopen("dados.csv", "a");
-    fprintf(fpt, "%d/%d/%d, %d:%d:%d,", data_hora->tm_mday, data_hora->tm_mon + 1, data_hora->tm_year + 1900, data_hora->tm_hour, data_hora->tm_min, data_hora->tm_sec);
+    fprintf(fpt, "%d/%d/%d, %d:%d", data_hora->tm_mday, data_hora->tm_mon + 1, data_hora->tm_year + 1900, data_hora->tm_hour, data_hora->tm_min);
     if (read_modbus(0xC1, &dado) != -1) {
-        fprintf(fpt, "%.2lf,", dado);
+        fprintf(fpt, "%.2lf, %.2lf", dado, get_temperatura());
     }
-    fprintf(fpt, "%.2lf,", pid_retorna_referencia());
-
+    fprintf(fpt, "%.2lf, %d\n", pid_retorna_referencia(), valor_acionamento);
 
     fclose(fpt);
 }
@@ -180,8 +183,11 @@ void controle(char modo) {
     int dispositivo = -1;
     write_modbus(0xD4, &modo_controle);
 
-    if (modo == TERMINAL)
+    if (modo == TERMINAL) {
         printf("Controle pela referência dada pelo terminal\n");
+        modo_controle = 1;
+        write_modbus(0xD4, &modo_controle);
+    }
     else if (modo == CURVA)
         printf("Controle por Curva Reflow\n");
     else
@@ -228,7 +234,7 @@ void controle(char modo) {
             else if (modo == TERMINAL) {
                 curva_reflow(TERMINAL, &dispositivo);
             }
-            salvar_dados_arquivo();
+            salvar_dados_arquivo(dispositivo);
             sleep(1);
         }
     }
@@ -265,6 +271,12 @@ void menu() {
     }
 }
 
+void trata_sinal(int sig) {
+    softPwmStop(RESISTOR);
+    softPwmStop(VENTOINHA);
+    exit(0);
+}
+
 int main(int argc, const char* argv[]) {
     printf("Para inciar, defina os parametros para o calculo do PID\n");
     config_param();
@@ -272,13 +284,11 @@ int main(int argc, const char* argv[]) {
     printf("Aguardando o sistema ser ligado...\n");
 
     FILE* fpt;
-    struct tm* data_hora;
-    time_t segundos;
-
     fpt = fopen("dados.csv", "w+");
     fprintf(fpt, "Data, Hora, Temperatura Interna, Temperatura Externa, Temperatura Usuario, Valor Acionamento\n");
     fclose(fpt);
 
+    signal(SIGINT, trata_sinal);
     while (1) {
         int dado;
         if (read_modbus(0xC3, &dado) == -1)
@@ -297,3 +307,5 @@ int main(int argc, const char* argv[]) {
     }
     return 0;
 }
+
+
