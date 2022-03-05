@@ -56,7 +56,7 @@ int read_modbus(char subcodigo, void* buffer) {
 
     init();
     uart_write(tx_buffer, p_tx_buffer - &tx_buffer[0] + sizeof(short));
-    sleep(1);
+    usleep(300000);
 
     int i, cond = 0, tamanho;
     for (i = 0; i < 5; i++) {

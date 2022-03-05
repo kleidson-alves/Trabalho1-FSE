@@ -11,7 +11,7 @@
 #include "wiringPi.h"
 #include "softPwm.h"
 #include "bme280.h"
-#include "sensor.h"
+#include "bme_userspace.h"
 
 #define POTENCIOMETRO 0
 #define CURVA 1
@@ -25,7 +25,7 @@ struct Dado_Arquivo {
     float temp;
 }Dado_Arquivo;
 
-struct Dado_Arquivo dados[20];
+struct Dado_Arquivo dados[50];
 int cont_tempo = -1;
 int pos = 0;
 
@@ -81,7 +81,6 @@ void carrega_arquivo() {
     char buffer[1024];
     int row = 0;
     int column = 0;
-
     while (fgets(buffer, 1024, fp)) {
         column = 0;
         row++;
@@ -116,11 +115,14 @@ void salvar_dados_arquivo(int valor_acionamento) {
     data_hora = localtime(&segundos);
 
     fpt = fopen("dados.csv", "a");
-    fprintf(fpt, "%d/%d/%d, %d:%d", data_hora->tm_mday, data_hora->tm_mon + 1, data_hora->tm_year + 1900, data_hora->tm_hour, data_hora->tm_min);
+    fprintf(fpt, "%d/%d/%d, %d:%d,", data_hora->tm_mday, data_hora->tm_mon + 1, data_hora->tm_year + 1900, data_hora->tm_hour, data_hora->tm_min);
     if (read_modbus(0xC1, &dado) != -1) {
-        fprintf(fpt, "%.2lf, %.2lf", dado, get_temperatura());
+        fprintf(fpt, "%.2lf, ", dado);
     }
-    fprintf(fpt, "%.2lf, %d\n", pid_retorna_referencia(), valor_acionamento);
+    else {
+        fprintf(fpt, "0, ");
+    }
+    fprintf(fpt, "%.2lf, %.2lf, %d\n", get_temperatura(), pid_retorna_referencia(), valor_acionamento);
 
     fclose(fpt);
 }
@@ -148,6 +150,7 @@ void controla_ambiente(int* dispositivo) {
             }
 
             softPwmWrite(VENTOINHA, sinal_controle * -1);
+            softPwmWrite(RESISTOR, 0);
         }
         *dispositivo = sinal_controle;
     }
@@ -160,8 +163,11 @@ void curva_reflow(int modo, int* dispositivo) {
     else if (modo == ARQUIVO) {
         float temp_referencia;
         if (cont_tempo == dados[pos].tempo) {
+            printf("Atualizando temperatura. . .\n");
             temp_referencia = dados[pos].temp;
+            printf("Atualizada para --> %.2lf\n", temp_referencia);
             pos++;
+            printf("Nova temperatura no segundo %d\n", dados[pos].tempo);
             pid_atualiza_referencia(temp_referencia);
             write_modbus(0xD2, &temp_referencia);
         }
@@ -213,6 +219,7 @@ void controle(char modo) {
                     modo = POTENCIOMETRO;
                     write_modbus(0xD4, &modo);
                     cont_tempo = -1;
+                    pos = 0;
                     printf("Controle alterado para potenciometro\n");
 
                 }
@@ -229,13 +236,14 @@ void controle(char modo) {
             }
             else if (modo == CURVA) {
                 cont_tempo++;
+                printf("Tempo = %d\n", cont_tempo);
                 curva_reflow(ARQUIVO, &dispositivo);
             }
             else if (modo == TERMINAL) {
                 curva_reflow(TERMINAL, &dispositivo);
             }
+
             salvar_dados_arquivo(dispositivo);
-            sleep(1);
         }
     }
     else {
@@ -274,6 +282,8 @@ void menu() {
 void trata_sinal(int sig) {
     softPwmStop(RESISTOR);
     softPwmStop(VENTOINHA);
+    char estado_sistema = 0;
+    write_modbus(0xD3, &estado_sistema);
     exit(0);
 }
 
@@ -307,5 +317,3 @@ int main(int argc, const char* argv[]) {
     }
     return 0;
 }
-
-
