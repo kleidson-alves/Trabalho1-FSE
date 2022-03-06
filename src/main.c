@@ -12,6 +12,7 @@
 #include "softPwm.h"
 #include "bme280.h"
 #include "bme_userspace.h"
+#include "lcd.h"
 
 #define POTENCIOMETRO 0
 #define CURVA 1
@@ -28,6 +29,8 @@ struct Dado_Arquivo {
 struct Dado_Arquivo dados[50];
 int cont_tempo = -1;
 int pos = 0;
+
+float temp_int = 0;
 
 void config_param() {
     double kp, ki, kd;
@@ -72,6 +75,22 @@ void config_temp() {
     write_modbus(0xD2, &referencia);
 }
 
+void apresentar_temperaturas(char modo) {
+    ClrLcd();
+    if (modo == TERMINAL)
+        typeln("TERMINAL");
+    else
+        typeln("UART");
+
+    typeln(" Ti:");
+    typeFloat(temp_int);
+    lcdLoc(LINE2);
+    typeln("Te:");
+    typeFloat(get_temperatura());
+    typeln(" Tr:");
+    typeFloat(pid_retorna_referencia());
+}
+
 void carrega_arquivo() {
     FILE* fp = fopen("curva_reflow.csv", "r");
     if (!fp) {
@@ -105,46 +124,56 @@ void carrega_arquivo() {
     fclose(fp);
 }
 
-void salvar_dados_arquivo(int valor_acionamento) {
+void inicia_arquivo(char* nome_arquivo) {
+    FILE* fpt;
+    fpt = fopen(nome_arquivo, "w+");
+    fprintf(fpt, "Data, Hora, Temperatura Interna, Temperatura Externa, Temperatura Usuario, Valor Acionamento\n");
+    fclose(fpt);
+}
+
+void salvar_dados_arquivo(char modo, int valor_acionamento) {
     FILE* fpt;
     struct tm* data_hora;
     time_t segundos;
-    float dado;
 
     time(&segundos);
     data_hora = localtime(&segundos);
 
-    fpt = fopen("dados.csv", "a");
-    fprintf(fpt, "%d/%d/%d, %d:%d,", data_hora->tm_mday, data_hora->tm_mon + 1, data_hora->tm_year + 1900, data_hora->tm_hour, data_hora->tm_min);
-    if (read_modbus(0xC1, &dado) != -1) {
-        fprintf(fpt, "%.2lf, ", dado);
-    }
-    else {
-        fprintf(fpt, "0, ");
-    }
-    fprintf(fpt, "%.2lf, %.2lf, %d\n", get_temperatura(), pid_retorna_referencia(), valor_acionamento);
+    if (modo == TERMINAL)
+        fpt = fopen("terminal.csv", "a");
+    else if (modo == CURVA)
+        fpt = fopen("curva.csv", "a");
+    else
+        fpt = fopen("potenciometro.csv", "a");
+
+    fprintf(fpt, "%d/%d/%d, %d:%d:%d,", data_hora->tm_mday, data_hora->tm_mon + 1, data_hora->tm_year + 1900, data_hora->tm_hour, data_hora->tm_min, data_hora->tm_sec);
+    fprintf(fpt, "%.2lf, ", temp_int);
+
+    double temp_ext = get_temperatura();
+    double temp_ref = pid_retorna_referencia();
+
+    fprintf(fpt, "%.2lf, %.2lf, %d\n", temp_ext, temp_ref, valor_acionamento);
 
     fclose(fpt);
 }
 
 void controla_ambiente(int* dispositivo) {
-    float temp_interna;
-
-    if (read_modbus(0xC1, &temp_interna) != -1) {
-        int sinal_controle = pid_controle(temp_interna);
+    float dado;
+    if (read_modbus(0xC1, &dado) != -1) {
+        temp_int = dado;
+        int sinal_controle = pid_controle(temp_int);
         write_modbus(0xD1, &sinal_controle);
-
         if (sinal_controle >= 0) {
-            if (*dispositivo < 0) {
-                printf("Resistor acionado\n");
-            }
+            // if (*dispositivo < 0) {
+            //     printf("Resistor acionado\n");
+            // }
 
             softPwmWrite(RESISTOR, sinal_controle);
         }
         else {
-            if (*dispositivo > 0) {
-                printf("Ventoinha acionada\n");
-            }
+            // if (*dispositivo > 0) {
+            //     printf("Ventoinha acionada\n");
+            // }
             if (sinal_controle > -40) {
                 sinal_controle = -40;
             }
@@ -157,22 +186,19 @@ void controla_ambiente(int* dispositivo) {
 }
 
 void curva_reflow(int modo, int* dispositivo) {
-    if (modo == TERMINAL) {
-        controla_ambiente(dispositivo);
-    }
-    else if (modo == ARQUIVO) {
-        float temp_referencia;
+
+    if (modo == ARQUIVO) {
         if (cont_tempo == dados[pos].tempo) {
             printf("Atualizando temperatura. . .\n");
-            temp_referencia = dados[pos].temp;
-            printf("Atualizada para --> %.2lf\n", temp_referencia);
+            double temp_ref = dados[pos].temp;
+            printf("Atualizada para --> %.2lf\n", temp_ref);
             pos++;
             printf("Nova temperatura no segundo %d\n", dados[pos].tempo);
-            pid_atualiza_referencia(temp_referencia);
-            write_modbus(0xD2, &temp_referencia);
+            pid_atualiza_referencia(temp_ref);
+            write_modbus(0xD2, &temp_ref);
         }
-        controla_ambiente(dispositivo);
     }
+    controla_ambiente(dispositivo);
 }
 
 void potenciometro(int* dispositivo) {
@@ -180,14 +206,15 @@ void potenciometro(int* dispositivo) {
     if (read_modbus(0xC2, &temp_potenciometro) != -1) {
         pid_atualiza_referencia(temp_potenciometro);
         write_modbus(0xD2, &temp_potenciometro);
+        controla_ambiente(dispositivo);
     }
-    controla_ambiente(dispositivo);
 }
 
 void controle(char modo) {
     char modo_controle = modo;
     int dispositivo = -1;
     write_modbus(0xD4, &modo_controle);
+    bme_init();
 
     if (modo == TERMINAL) {
         printf("Controle pela referência dada pelo terminal\n");
@@ -236,14 +263,14 @@ void controle(char modo) {
             }
             else if (modo == CURVA) {
                 cont_tempo++;
-                printf("Tempo = %d\n", cont_tempo);
                 curva_reflow(ARQUIVO, &dispositivo);
             }
             else if (modo == TERMINAL) {
                 curva_reflow(TERMINAL, &dispositivo);
             }
 
-            salvar_dados_arquivo(dispositivo);
+            salvar_dados_arquivo(modo, dispositivo);
+            apresentar_temperaturas(modo);
         }
     }
     else {
@@ -251,10 +278,11 @@ void controle(char modo) {
     }
 }
 
-
 void menu() {
     int escolha, dado;
     while (1) {
+        ClrLcd();
+        typeln("Aguardando ...");
         printf("1 - Parametros\n2 - Definir temperatura de referencia\n3 - Potenciometro/Curva Reflow\n");
         scanf("%d", &escolha);
 
@@ -282,37 +310,51 @@ void menu() {
 void trata_sinal(int sig) {
     softPwmStop(RESISTOR);
     softPwmStop(VENTOINHA);
+    bme_stop();
+    ClrLcd();
+    typeln("Desligado");
+    lcd_stop();
     char estado_sistema = 0;
     write_modbus(0xD3, &estado_sistema);
     exit(0);
 }
 
-int main(int argc, const char* argv[]) {
+void inicializacao() {
     printf("Para inciar, defina os parametros para o calculo do PID\n");
     config_param();
 
     printf("Aguardando o sistema ser ligado...\n");
 
-    FILE* fpt;
-    fpt = fopen("dados.csv", "w+");
-    fprintf(fpt, "Data, Hora, Temperatura Interna, Temperatura Externa, Temperatura Usuario, Valor Acionamento\n");
-    fclose(fpt);
+    inicia_arquivo("terminal.csv");
+    inicia_arquivo("curva.csv");
+    inicia_arquivo("potenciometro.csv");
+    lcd_setup();
+    ClrLcd();
+    typeln("Desligado");
+    bme_init();
+}
 
+int main(int argc, const char* argv[]) {
+
+    inicializacao();
     signal(SIGINT, trata_sinal);
+
     while (1) {
         int dado;
-        if (read_modbus(0xC3, &dado) == -1)
-            break;
-
-        if (dado == 0x01) {
-            printf("Ligando o sistema...\n");
-            char estado_sistema = 1;
-            write_modbus(0xD3, &estado_sistema);
-            menu();
-            estado_sistema = 0;
-            write_modbus(0xD3, &estado_sistema);
-            printf("Aguardando o sistema ser ligado...\n");
+        if (read_modbus(0xC3, &dado) != -1) {
+            if (dado == 0x01) {
+                printf("Ligando o sistema...\n");
+                char estado_sistema = 1;
+                write_modbus(0xD3, &estado_sistema);
+                menu();
+                estado_sistema = 0;
+                write_modbus(0xD3, &estado_sistema);
+                ClrLcd();
+                typeln("Desligado");
+                printf("Aguardando o sistema ser ligado...\n");
+            }
         }
+
         sleep(1);
     }
     return 0;

@@ -56,10 +56,10 @@ int read_modbus(char subcodigo, void* buffer) {
 
     init();
     uart_write(tx_buffer, p_tx_buffer - &tx_buffer[0] + sizeof(short));
-    usleep(300000);
+    usleep(400000);
 
     int i, cond = 0, tamanho;
-    for (i = 0; i < 5; i++) {
+    for (i = 0; i < 7; i++) {
         short rx_crc;
         tamanho = uart_read(rx_buffer);
         memcpy(&rx_crc, &rx_buffer[tamanho - 2], sizeof(short));
