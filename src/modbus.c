@@ -56,15 +56,15 @@ int read_modbus(char subcodigo, void* buffer) {
 
     init();
     uart_write(tx_buffer, p_tx_buffer - &tx_buffer[0] + sizeof(short));
-    usleep(400000);
+    usleep(500000);
 
     int i, cond = 0, tamanho;
-    for (i = 0; i < 7; i++) {
+    for (i = 0; i < 5; i++) {
         short rx_crc;
         tamanho = uart_read(rx_buffer);
         memcpy(&rx_crc, &rx_buffer[tamanho - 2], sizeof(short));
 
-        if (calcula_CRC(rx_buffer, tamanho - 2) == rx_crc) {
+        if (tamanho != -1 && calcula_CRC(rx_buffer, tamanho - 2) == rx_crc) {
             cond = 1;
             break;
         }
@@ -74,7 +74,7 @@ int read_modbus(char subcodigo, void* buffer) {
 
     int* dado = buffer;
 
-    memcpy(dado, &rx_buffer[3], sizeof(int));
+    memcpy(dado, &rx_buffer[3], sizeof(float));
 
     close_uart();
     return tamanho;
