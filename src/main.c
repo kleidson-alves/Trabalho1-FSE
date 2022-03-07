@@ -308,11 +308,11 @@ void menu() {
 void trata_sinal(int sig) {
 
     if (resistor != -1) {
-        pwmWrite(RESISTOR, 0);
+        softpwmWrite(RESISTOR, 0);
         softPwmStop(RESISTOR);
     }
     if (ventoinha != -1) {
-        softPwmWrite(VENTOINHA, 0);
+        sofPwmWrite(VENTOINHA, 0);
         softPwmStop(VENTOINHA);
     }
 
